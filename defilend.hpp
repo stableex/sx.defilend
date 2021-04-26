@@ -67,36 +67,71 @@ namespace defilend {
     typedef eosio::multi_index< "stat"_n, currency_stats > stats;
 
     static asset get_supply( const symbol& sym ) {
-        stats stats_tbl( token_code, sym_code.raw() );
-        const auto it = stats_tbl.find( sym_code.raw() );
+        stats stats_tbl( token_code, sym.code().raw() );
+        const auto it = stats_tbl.find( sym.code().raw() );
         return it != stats_tbl.end() && it->supply.symbol == sym ? it->supply : asset {};
     }
 
-    static asset is_btoken( const symbol& sym ) {
+    static bool is_btoken( const symbol& sym ) {
         return get_supply(sym).symbol.is_valid();
     }
 
-    static asset wrap( const asset& quantity, const asset& bsupply ) {
+    static extended_symbol get_btoken( const symbol& sym) {
+        reserves reserves_tbl( code, code.value);
+        for(const auto& row: reserves_tbl) {
+            if(row.sym == sym) {
+                return { row.bsym, token_code };
+            }
+        }
+        check(false, "sx.defilend::get_btoken: Not lendable");
+        return {};
+    }
+
+    static extended_asset wrap( const asset& quantity, const asset& bsupply ) {
         reserves reserves_tbl( code, code.value);
         for(const auto& row: reserves_tbl) {
             if(row.bsym == bsupply.symbol) {
                 check(row.sym == quantity.symbol, "sx.defilend::wrap: Wrong lendable pair");
-                return { static_cast<int64_t>(static_cast<int128_t>(quantity.amount) * bsupply.amount / row.practical_balance.amount), bsupply.symbol };
+                return { static_cast<int64_t>(static_cast<int128_t>(quantity.amount) * bsupply.amount / row.practical_balance.amount), extended_symbol{ bsupply.symbol, token_code } };
             }
         }
         check(false, "sx.defilend::wrap: Not lendable");
         return {};
     }
 
-    static asset unwrap( const asset& quantity, const asset& bsupply, const symbol& out_sym ) {
+    static extended_asset unwrap( const asset& quantity, const asset& bsupply, const symbol& out_sym ) {
         reserves reserves_tbl( code, code.value);
         for(const auto& row: reserves_tbl) {
             if(row.bsym == bsupply.symbol) {
                 check(row.sym == out_sym, "sx.defilend::unwrap: Wrong lendable pair");
-                return { static_cast<int64_t>(static_cast<int128_t>(quantity.amount) * row.practical_balance.amount / bsupply.amount), out_sym };
+                return { static_cast<int64_t>(static_cast<int128_t>(quantity.amount) * row.practical_balance.amount / bsupply.amount), extended_symbol{ out_sym, row.contract }};
             }
         }
-        check(false, "sx.defilend::unwrap: Not lendable");
+        check(false, "sx.defilend::unwrap: Not lendable: " + quantity.to_string());
+        return {};
+    }
+
+    static extended_asset wrap( const asset& quantity ) {
+        reserves reserves_tbl( code, code.value);
+        for(const auto& row: reserves_tbl) {
+            if(row.sym == quantity.symbol) {
+                const auto bsupply = get_supply(row.bsym);
+                return { static_cast<int64_t>(static_cast<int128_t>(quantity.amount) * bsupply.amount / row.practical_balance.amount), extended_symbol{ bsupply.symbol, token_code } };
+            }
+        }
+        check(false, "sx.defilend::wrap: Not lendable");
+        return {};
+    }
+
+    static extended_asset unwrap( const asset& quantity ) {
+        reserves reserves_tbl( code, code.value);
+        for(const auto& row: reserves_tbl) {
+            if(row.bsym == quantity.symbol) {
+                const auto bsupply = get_supply(row.bsym);
+                return { static_cast<int64_t>(static_cast<int128_t>(quantity.amount) * row.practical_balance.amount / bsupply.amount), extended_symbol{ row.sym, row.contract }};
+            }
+        }
+        check(false, "sx.defilend::unwrap: Not lendable: " + quantity.to_string());
         return {};
     }
     /**
@@ -124,10 +159,10 @@ namespace defilend {
     static asset get_amount_out( const asset quantity, const symbol out_sym )
     {
         auto bsupply = get_supply(out_sym);
-        if(bsupply.symbol.is_valid()) return wrap(quantity, bsupply);
+        if(bsupply.symbol.is_valid()) return wrap(quantity, bsupply).quantity;
 
         bsupply = get_supply(quantity.symbol);
-        if(bsupply.symbol.is_valid()) return unwrap(quantity, bsupply, out_sym);
+        if(bsupply.symbol.is_valid()) return unwrap(quantity, bsupply, out_sym).quantity;
 
         check(false, "sx.defilend: Not B-token");
         return {};

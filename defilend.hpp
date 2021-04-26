@@ -66,6 +66,14 @@ namespace defilend {
     };
     typedef eosio::multi_index< "stat"_n, currency_stats > stats;
 
+    struct [[eosio::table]] userconfigs_row {
+        uint64_t    reserve_id;
+        bool        use_as_collateral;
+
+        uint64_t primary_key()const { return reserve_id; }
+    };
+    typedef eosio::multi_index< "userconfigs"_n, userconfigs_row > userconfigs;
+
     static asset get_supply( const symbol& sym ) {
         stats stats_tbl( token_code, sym.code().raw() );
         const auto it = stats_tbl.find( sym.code().raw() );
@@ -166,6 +174,23 @@ namespace defilend {
 
         check(false, "sx.defilend: Not B-token");
         return {};
+    }
+
+    static void unstake( const name authorizer, const name owner, const symbol_code sym)
+    {
+        reserves reserves_tbl( code, code.value);
+        userconfigs configs(code, owner.value);
+        for(const auto& row: configs) {
+            const auto pool = reserves_tbl.get(row.reserve_id, "defilend: no reserve");
+            if(pool.bsym.code() == sym) return;     //already unstaked
+        }
+
+        action(
+            permission_level{authorizer,"active"_n},
+            defilend::code,
+            "unstake"_n,
+            std::make_tuple(owner, sym)
+        ).send();
     }
 
 }

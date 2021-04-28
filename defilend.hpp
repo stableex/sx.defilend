@@ -1,10 +1,12 @@
 #pragma once
 
 #include <eosio/asset.hpp>
+#include <sx.utils/utils.hpp>
 
 namespace defilend {
 
     using namespace eosio;
+    using namespace sx;
 
     const name id = "defilend"_n;
     const name code = "lend.defi"_n;
@@ -62,15 +64,6 @@ namespace defilend {
         indexed_by< "bybsym"_n, const_mem_fun<reserves_row, uint64_t, &reserves_row::get_by_bsym> >
     > reserves;
 
-    struct [[eosio::table]] currency_stats {
-        asset    supply;
-        asset    max_supply;
-        name     issuer;
-
-        uint64_t primary_key()const { return supply.symbol.code().raw(); }
-    };
-    typedef eosio::multi_index< "stat"_n, currency_stats > stats;
-
     struct [[eosio::table]] userconfigs_row {
         uint64_t    reserve_id;
         bool        use_as_collateral;
@@ -79,14 +72,8 @@ namespace defilend {
     };
     typedef eosio::multi_index< "userconfigs"_n, userconfigs_row > userconfigs;
 
-    static asset get_supply( const symbol_code& symcode ) {
-        stats stats_tbl( token_code, symcode.raw() );
-        const auto it = stats_tbl.begin();
-        return it != stats_tbl.end() ? it->supply : asset {};
-    }
-
-    static bool is_btoken( const symbol_code& symcode ) {
-        return get_supply(symcode).symbol.is_valid();
+    static bool is_btoken( const symbol& sym ) {
+        return utils::get_supply({ sym, token_code }).symbol.is_valid();
     }
 
     //get first b-token based on symcode (could be wrong if there are multiple wrapped tokens with the same symbol code)
@@ -104,7 +91,7 @@ namespace defilend {
         reserves reserves_tbl( code, code.value);
         for(const auto& row: reserves_tbl) {        //TODO: use secondary index (need to pass extended_asset to the method)
             if(row.sym == quantity.symbol) {
-                const auto bsupply = get_supply(row.bsym.code());
+                const auto bsupply = utils::get_supply({ row.bsym, token_code });
                 return { static_cast<int64_t>(static_cast<int128_t>(quantity.amount) * bsupply.amount / row.practical_balance.amount), extended_symbol{ bsupply.symbol, token_code } };
             }
         }
@@ -118,7 +105,7 @@ namespace defilend {
         const auto it = index.lower_bound(quantity.symbol.code().raw());
         check(it != index.end() && it->bsym == quantity.symbol, "sx.defilend::unwrap: Not redeemable: " + quantity.to_string());
 
-        const auto bsupply = get_supply(it->bsym.code());
+        const auto bsupply = utils::get_supply({ it->bsym, token_code });
         int64_t out_amount = static_cast<int128_t>(quantity.amount) * it->practical_balance.amount / bsupply.amount;
 
         if( it->practical_balance.amount < out_amount + it->utilization_rate * it->practical_balance.amount / 100000000000000 )
@@ -150,12 +137,12 @@ namespace defilend {
      */
     static asset get_amount_out( const asset quantity, const symbol out_sym )
     {
-        if(is_btoken(out_sym.code())) {
+        if(is_btoken(out_sym)) {
             const auto out = wrap(quantity).quantity;
             if(out.symbol == out_sym) return out;
         }
 
-        if(is_btoken(quantity.symbol.code())) {
+        if(is_btoken(quantity.symbol)) {
             const auto out = unwrap(quantity).quantity;
             if(out.symbol == out_sym) return out;
         }

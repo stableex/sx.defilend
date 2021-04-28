@@ -54,8 +54,13 @@ namespace defilend {
         time_point_sec last_update_time;
 
         uint64_t primary_key() const { return id; }
+        uint128_t get_secondary_1() const { return 0; }             //unknown?
+        uint64_t get_by_bsym() const { return bsym.code().raw(); }
     };
-    typedef eosio::multi_index< "reserves"_n, reserves_row > reserves;
+    typedef eosio::multi_index< "reserves"_n, reserves_row,
+        indexed_by< "bysecondary1"_n, const_mem_fun<reserves_row, uint128_t, &reserves_row::get_secondary_1> >,
+        indexed_by< "bybsym"_n, const_mem_fun<reserves_row, uint64_t, &reserves_row::get_by_bsym> >
+    > reserves;
 
     struct [[eosio::table]] currency_stats {
         asset    supply;
@@ -109,14 +114,14 @@ namespace defilend {
 
     static extended_asset unwrap( const asset& quantity ) {
         reserves reserves_tbl( code, code.value);
-        for(const auto& row: reserves_tbl) {
-            if(row.bsym == quantity.symbol) {
-                const auto bsupply = get_supply(row.bsym.code());
-                return { static_cast<int64_t>(static_cast<int128_t>(quantity.amount) * row.practical_balance.amount / bsupply.amount), extended_symbol{ row.sym, row.contract }};
-            }
-        }
-        check(false, "sx.defilend::unwrap: Not lendable: " + quantity.to_string());
-        return {};
+        auto index = reserves_tbl.get_index<"bybsym"_n>();
+        const auto it = index.lower_bound(quantity.symbol.code().raw());
+        check(it != index.end() && it->bsym == quantity.symbol, "sx.defilend::unwrap: Not redeemable: " + quantity.to_string());
+
+        const auto bsupply = get_supply(it->bsym.code());
+        int64_t out_amount = static_cast<int128_t>(quantity.amount) * it->practical_balance.amount / bsupply.amount;
+
+        return { out_amount, extended_symbol{ it->sym, it->contract }};
     }
     /**
      * ## STATIC `get_amount_out`

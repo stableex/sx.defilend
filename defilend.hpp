@@ -121,6 +121,9 @@ namespace defilend {
         const auto bsupply = get_supply(it->bsym.code());
         int64_t out_amount = static_cast<int128_t>(quantity.amount) * it->practical_balance.amount / bsupply.amount;
 
+        if( it->practical_balance.amount < out_amount + it->utilization_rate * it->practical_balance.amount / 100000000000000 )
+            out_amount = 0;
+
         return { out_amount, extended_symbol{ it->sym, it->contract }};
     }
     /**

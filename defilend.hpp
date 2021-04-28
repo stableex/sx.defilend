@@ -28,7 +28,7 @@ namespace defilend {
         asset       maximum_total_deposit;
         uint128_t   overall_borrow_rate;
         uint128_t   current_liquidity_rate;
-        uint128_t    current_variable_borrow_rate;
+        uint128_t   current_variable_borrow_rate;
         uint128_t   current_stable_borrow_rate;
         uint128_t   current_avg_stable_borrow_rate;
         uint128_t   reserve_factor;
@@ -54,11 +54,11 @@ namespace defilend {
         time_point_sec last_update_time;
 
         uint64_t primary_key() const { return id; }
-        uint128_t get_secondary_1() const { return 0; }             //unknown?
+        uint128_t get_by_extsym() const { return static_cast<uint128_t>(contract.value) << 8 | sym.code().raw(); }
         uint64_t get_by_bsym() const { return bsym.code().raw(); }
     };
     typedef eosio::multi_index< "reserves"_n, reserves_row,
-        indexed_by< "bysecondary1"_n, const_mem_fun<reserves_row, uint128_t, &reserves_row::get_secondary_1> >,
+        indexed_by< "byextsym"_n, const_mem_fun<reserves_row, uint128_t, &reserves_row::get_by_extsym> >,
         indexed_by< "bybsym"_n, const_mem_fun<reserves_row, uint64_t, &reserves_row::get_by_bsym> >
     > reserves;
 
@@ -102,7 +102,7 @@ namespace defilend {
 
     static extended_asset wrap( const asset& quantity ) {
         reserves reserves_tbl( code, code.value);
-        for(const auto& row: reserves_tbl) {
+        for(const auto& row: reserves_tbl) {        //TODO: use secondary index (need to pass extended_asset to the method)
             if(row.sym == quantity.symbol) {
                 const auto bsupply = get_supply(row.bsym.code());
                 return { static_cast<int64_t>(static_cast<int128_t>(quantity.amount) * bsupply.amount / row.practical_balance.amount), extended_symbol{ bsupply.symbol, token_code } };

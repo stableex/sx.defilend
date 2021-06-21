@@ -12,6 +12,8 @@ namespace defilend {
     const name code = "lend.defi"_n;
     const std::string description = "Lend.Defi Converter";
     const name token_code = "btoken.defi"_n;
+    const name oracle_code = "oracle.defi"_n;
+    const extended_symbol value_symbol { symbol{"USDT",4}, "tethertether"_n };
 
     struct [[eosio::table]] reserves_row {
         uint64_t    id;
@@ -71,6 +73,39 @@ namespace defilend {
         uint64_t primary_key()const { return reserve_id; }
     };
     typedef eosio::multi_index< "userconfigs"_n, userconfigs_row > userconfigs;
+
+
+    struct [[eosio::table]] oracle_row {
+        uint64_t        id;
+        name            contract;
+        symbol_code     coin;
+        uint8_t         precision;
+        uint64_t        acc_price;
+        uint64_t        last_price;
+        uint64_t        avg_price;
+        time_point_sec  last_update;
+
+        uint64_t primary_key()const { return id; }
+    };
+    typedef eosio::multi_index< "prices"_n, oracle_row > prices;
+
+    struct [[eosio::table]] userreserves_row {
+        uint64_t        reserve_id;
+        asset           principal_borrow_balance;
+        asset           compounded_interest;
+        uint128_t       last_variable_borrow_cumulative_index;
+        uint128_t       stable_borrow_rate;
+        time_point_sec  last_update_time;
+
+        uint64_t primary_key()const { return reserve_id; }
+    };
+    typedef eosio::multi_index< "userreserves"_n, userreserves_row > userreserves;
+
+    struct StOraclizedAsset {
+        extended_asset tokens;
+        double value;
+        double ratioed;
+    };
 
     static bool is_btoken( const symbol& sym ) {
         return utils::get_supply({ sym, token_code }).symbol.is_valid();
@@ -207,5 +242,155 @@ namespace defilend {
             std::make_tuple(owner, sym)
         ).send();
     }
+
+
+    /**
+     * ## STATIC `get_value`
+     *
+     * Given an input amount of an asset and Defibox oracle id, return USD value based on Defibox oracle
+     *
+     * ### params
+     *
+     * - `{extended_asset} in` - input tokens
+     * - `{uint64_t} oracle_id` - oracle id
+     *
+     * ### example
+     *
+     * ```c++
+     * // Inputs
+     * const extended_asset in = asset { 10000, "EOS" };
+     * const symbol oracle_id = 1;
+     *
+     * // Calculation
+     * const asset out = defilend::get_value( in, oracle_id );
+     * // => 4.0123
+     * ```
+     */
+    static double get_value( const extended_asset in, const uint64_t oracle_id )
+    {
+        if(in.get_extended_symbol() == value_symbol)
+            return static_cast<double>(in.quantity.amount) / pow(10, in.quantity.symbol.precision());
+
+        prices prices_tbl( oracle_code, oracle_code.value);
+        const auto row = prices_tbl.get(oracle_id, "defilend: no oracle");
+
+        return static_cast<double>(in.quantity.amount)  / pow(10, in.quantity.symbol.precision()) * (static_cast<double>(row.avg_price) / pow(10, row.precision));
+    }
+
+
+    /**
+     * ## STATIC `get_collaterals`
+     *
+     * Given an account name return collaterals and their values
+     *
+     * ### params
+     *
+     * - `{name} account` - account
+     *
+     * ### example
+     *
+     * ```c++
+     * // Inputs
+     * const name account = "myusername";
+     *
+     * // Calculation
+     * const vector<StOraclizedAsset> collaterals = defilend::get_collaterals( account );
+     * // => { {"400 USDT", 400, 300}, {"100 EOS", 500, 375} }
+     * ```
+     */
+    static vector<StOraclizedAsset> get_collaterals( const name account )
+    {
+        vector<StOraclizedAsset> res;
+        reserves reserves_tbl( code, code.value);
+        userconfigs configs_tbl(code, account.value);
+        for(const auto& row: configs_tbl) {
+            if(!row.use_as_collateral) continue;
+            const auto reserve = reserves_tbl.get(row.reserve_id, "defilend: no collateral reserve");
+            const auto bdeposit = utils::get_balance({ reserve.bsym, token_code }, account ).quantity;
+            if(bdeposit.amount == 0) continue;
+            const auto supply = utils::get_supply({ reserve.bsym, token_code });
+            const auto tokens = reserve.practical_balance / ((double) supply.amount / bdeposit.amount);
+            const extended_asset ext_tokens = { tokens, reserve.contract };
+            if( tokens.amount == 0) continue;
+            const auto value = get_value(ext_tokens, reserve.oracle_price_id);
+            res.push_back({ ext_tokens, value, value * reserve.liquidation_threshold / 10000 });
+        }
+
+        return res;
+    }
+
+    /**
+     * ## STATIC `get_loans`
+     *
+     * Given an account name return user loans and their values
+     *
+     * ### params
+     *
+     * - `{name} account` - account
+     *
+     * ### example
+     *
+     * ```c++
+     * // Inputs
+     * const name account = "myusername";
+     *
+     * // Calculation
+     * const vector<StOraclizedAsset> loans = defilend::get_loans( account );
+     * // => { {"400 USDT", 400, 300}, {"100 EOS", 500, 375} }
+     * ```
+     */
+    static vector<StOraclizedAsset> get_loans( const name account )
+    {
+        vector<StOraclizedAsset> res;
+        reserves reserves_tbl( code, code.value);
+        userreserves userreserves_tbl(code, account.value);
+        for(const auto& row: userreserves_tbl) {
+            const auto reserve = reserves_tbl.get(row.reserve_id, "defilend: no loan reserve");
+            const extended_asset ext_tokens = { row.principal_borrow_balance, reserve.contract };
+            // TODO: calculate and add compounded interest
+            const auto value = get_value(ext_tokens, reserve.oracle_price_id);
+            res.push_back({ ext_tokens, value, value });
+        }
+
+        return res;
+    }
+
+    /**
+     * ## STATIC `get_health_factor`
+     *
+     * Given an account name return user health factor
+     *
+     * ### params
+     *
+     * - `{name} account` - account
+     *
+     * ### example
+     *
+     * ```c++
+     * // Inputs
+     * const name account = "myusername";
+     *
+     * // Calculation
+     * const double health_factor = defilend::get_health_factor( account );
+     * // => 1.2345
+     * ```
+     */
+    static double get_health_factor( const name account )
+    {
+        double deposited = 0, loaned = 0;
+
+        const auto collaterals = get_collaterals(account);
+        for(const auto coll: collaterals){
+            deposited += coll.ratioed;
+        }
+
+        const auto loans = defilend::get_loans(account);
+        for(const auto loan: loans){
+            loaned += loan.value;
+        }
+        return loaned == 0 ? 0 : deposited / loaned;
+    }
+
+
 
 }

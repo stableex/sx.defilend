@@ -87,6 +87,26 @@ namespace defilend {
         return {};
     }
 
+    /**
+     * ## STATIC `unwrap`
+     *
+     * Given an input amount of tokens calculate amount B-tokens on deposit
+     *
+     * ### params
+     *
+     * - `{asset} quantity` - input amount
+     *
+     * ### example
+     *
+     * ```c++
+     * // Inputs
+     * const asset in = asset { 1000, "USDT" };
+     *
+     * // Calculation
+     * const extended_asset out = defilend::wrap( in );
+     * // => 100000 BUSDT@btoken.defi
+     * ```
+     */
     static extended_asset wrap( const asset& quantity ) {
         reserves reserves_tbl( code, code.value);
         for(const auto& row: reserves_tbl) {        //TODO: use secondary index (need to pass extended_asset to the method)
@@ -99,6 +119,26 @@ namespace defilend {
         return {};
     }
 
+    /**
+     * ## STATIC `unwrap`
+     *
+     * Given an input amount of B-tokens calculate amount redeemed tokens
+     *
+     * ### params
+     *
+     * - `{asset} quantity` - input amount
+     *
+     * ### example
+     *
+     * ```c++
+     * // Inputs
+     * const asset in = asset { 1000000, "BUSDT" };
+     *
+     * // Calculation
+     * const extended_asset out = defilend::unwrap( in );
+     * // => 10000 USDT@tethertether
+     * ```
+     */
     static extended_asset unwrap( const asset& quantity ) {
         reserves reserves_tbl( code, code.value);
         auto index = reserves_tbl.get_index<"bybsym"_n>();

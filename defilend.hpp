@@ -344,10 +344,16 @@ namespace defilend {
         vector<StOraclizedAsset> res;
         reserves reserves_tbl( code, code.value);
         userreserves userreserves_tbl(code, account.value);
+        const auto now = eosio::current_time_point().sec_since_epoch();
         for(const auto& row: userreserves_tbl) {
             const auto reserve = reserves_tbl.get(row.reserve_id, "defilend: no loan reserve");
-            const extended_asset ext_tokens = { row.principal_borrow_balance, reserve.contract };
-            // TODO: calculate and add compounded interest
+            const auto secs = now - row.last_update_time.sec_since_epoch();
+            const auto rate1 = reserve.current_variable_borrow_rate * secs / (365*24*60*60);
+            const auto rate2 = rate1 * reserve.last_variable_borrow_cumulative_index / row.last_variable_borrow_cumulative_index;
+            const auto accrued_amount = row.principal_borrow_balance.amount * interest2 / 100000000000000;
+            const auto accrued = asset{ static_cast<int64_t>(accrued_amount), row.principal_borrow_balance.symbol };
+            //print("\n  Principal: ", row.principal_borrow_balance, ", Seconds: ", secs, ", Rate1: ", rate1, ", Rate2: ", rate2, ", accrued: ", accrued);
+            const extended_asset ext_tokens = { row.principal_borrow_balance + accrued, reserve.contract };
             const auto value = get_value(ext_tokens, reserve.oracle_price_id);
             res.push_back({ ext_tokens, value, value });
         }

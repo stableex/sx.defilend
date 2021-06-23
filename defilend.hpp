@@ -427,7 +427,7 @@ namespace defilend {
     }
 
     /**
-     * ## STATIC `get_amount_out`
+     * ## STATIC `get_liquidation_out`
      *
      * Calculate collateral tokens to receive when liquidating {ext_in} debt
      * Payout = (In * Oracle_last_price_Loan) * (1 + Liquidation_bonus_col) / Oracle_last_price_Col
@@ -449,11 +449,11 @@ namespace defilend {
      * const vector<OraclizedAsset> collaterals = { {"500 USDT", 700, 300}, {"200 EOS", 600, 375} };
      *
      * // Calculation
-     * const auto out = defilend::get_amount_out( ext_in, ext_sym_out, loans, collaterals );
+     * const auto out = defilend::get_liquidation_out( ext_in, ext_sym_out, loans, collaterals );
      * // => 100 EOS
      * ```
      */
-    static extended_asset get_amount_out( const extended_asset ext_in, const extended_symbol ext_sym_out, const vector<OraclizedAsset>& loans, const vector<OraclizedAsset>& collaterals )
+    static extended_asset get_liquidation_out( const extended_asset ext_in, const extended_symbol ext_sym_out, const vector<OraclizedAsset>& loans, const vector<OraclizedAsset>& collaterals )
     {
         const auto hf = get_health_factor(loans, collaterals);
         if(hf >= 1) return { 0, ext_sym_out };
@@ -469,21 +469,21 @@ namespace defilend {
         reserves reserves_tbl( code, code.value);
         auto index = reserves_tbl.get_index<"byextsym"_n>();
         auto it = index.lower_bound(static_cast<uint128_t>(ext_in.contract.value) << 64 | ext_in.quantity.symbol.code().raw());
-        check(it != index.end() && it->sym == ext_in.quantity.symbol, "sx.defilend::get_amount_out1: Not a reserve: " + ext_in.quantity.symbol.code().to_string() + "@" + ext_in.contract.to_string() + " found: " + it->sym.code().to_string());
+        check(it != index.end() && it->sym == ext_in.quantity.symbol, "sx.defilend::get_liquidation_out: Loan not a reserve: " + ext_in.quantity.symbol.code().to_string() + "@" + ext_in.contract.to_string() + " found: " + it->sym.code().to_string());
         const auto loan_res = *it;
 
         it = index.lower_bound(static_cast<uint128_t>(ext_sym_out.get_contract().value) << 64 | ext_sym_out.get_symbol().code().raw());
-        check(it != index.end() && it->sym == ext_sym_out.get_symbol(), "sx.defilend::get_amount_out2: Not a reserve: " + ext_sym_out.get_symbol().code().to_string() + "@" + ext_sym_out.get_contract().to_string()+ " found: " + it->sym.code().to_string());
+        check(it != index.end() && it->sym == ext_sym_out.get_symbol(), "sx.defilend::get_liquidation_out: Collateral not a reserve: " + ext_sym_out.get_symbol().code().to_string() + "@" + ext_sym_out.get_contract().to_string()+ " found: " + it->sym.code().to_string());
         const auto coll_res = *it;
 
         prices prices_tbl( oracle_code, oracle_code.value);
         double loan_price = 1, coll_price = 1;
         if(loan_res.oracle_price_id){
-            const auto row = prices_tbl.get(loan_res.oracle_price_id, "defilend::get_amount_out: no loan oracle");
+            const auto row = prices_tbl.get(loan_res.oracle_price_id, "defilend::get_liquidation_out: no loan oracle");
             loan_price = row.last_price / pow(10, row.precision);
         }
         if(coll_res.oracle_price_id){
-            const auto row = prices_tbl.get(coll_res.oracle_price_id, "defilend::get_amount_out: no coll oracle");
+            const auto row = prices_tbl.get(coll_res.oracle_price_id, "defilend::get_liquidation_out: no coll oracle");
             coll_price = row.last_price / pow(10, row.precision);
         }
 

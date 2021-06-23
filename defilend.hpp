@@ -58,7 +58,7 @@ namespace defilend {
         time_point_sec last_update_time;
 
         uint64_t primary_key() const { return id; }
-        uint128_t get_by_extsym() const { return static_cast<uint128_t>(contract.value) << 8 | sym.code().raw(); }
+        uint128_t get_by_extsym() const { return static_cast<uint128_t>(contract.value) << 64 | sym.code().raw(); }
         uint64_t get_by_bsym() const { return bsym.code().raw(); }
     };
     typedef eosio::multi_index< "reserves"_n, reserves_row,
@@ -101,7 +101,7 @@ namespace defilend {
     };
     typedef eosio::multi_index< "userreserves"_n, userreserves_row > userreserves;
 
-    struct StOraclizedAsset {
+    struct OraclizedAsset {
         extended_asset tokens;
         double value;
         double ratioed;
@@ -298,9 +298,9 @@ namespace defilend {
      * // => { {"400 USDT", 400, 300}, {"100 EOS", 500, 375} }
      * ```
      */
-    static vector<StOraclizedAsset> get_collaterals( const name account )
+    static vector<OraclizedAsset> get_collaterals( const name account )
     {
-        vector<StOraclizedAsset> res;
+        vector<OraclizedAsset> res;
         reserves reserves_tbl( code, code.value);
         userconfigs configs_tbl(code, account.value);
         for(const auto& row: configs_tbl) {
@@ -339,9 +339,9 @@ namespace defilend {
      * // => { {"400 USDT", 400, 300}, {"100 EOS", 500, 375} }
      * ```
      */
-    static vector<StOraclizedAsset> get_loans( const name account )
+    static vector<OraclizedAsset> get_loans( const name account )
     {
-        vector<StOraclizedAsset> res;
+        vector<OraclizedAsset> res;
         reserves reserves_tbl( code, code.value);
         userreserves userreserves_tbl(code, account.value);
         const auto now = eosio::current_time_point().sec_since_epoch();
@@ -350,9 +350,9 @@ namespace defilend {
             const auto secs = now - row.last_update_time.sec_since_epoch();
             const auto rate1 = reserve.current_variable_borrow_rate * secs / (365*24*60*60);
             const auto rate2 = rate1 * reserve.last_variable_borrow_cumulative_index / row.last_variable_borrow_cumulative_index;
-            const auto accrued_amount = row.principal_borrow_balance.amount * interest2 / 100000000000000;
+            const auto accrued_amount = row.principal_borrow_balance.amount * rate2 / 100000000000000;
             const auto accrued = asset{ static_cast<int64_t>(accrued_amount), row.principal_borrow_balance.symbol };
-            //print("\n  Principal: ", row.principal_borrow_balance, ", Seconds: ", secs, ", Rate1: ", rate1, ", Rate2: ", rate2, ", accrued: ", accrued);
+            // print("\n  Principal: ", row.principal_borrow_balance, ", Seconds: ", secs, ", Rate1: ", rate1, ", Rate2: ", rate2, ", accrued: ", accrued);
             const extended_asset ext_tokens = { row.principal_borrow_balance + accrued, reserve.contract };
             const auto value = get_value(ext_tokens, reserve.oracle_price_id);
             res.push_back({ ext_tokens, value, value });
@@ -360,6 +360,43 @@ namespace defilend {
 
         return res;
     }
+
+
+    /**
+     * ## STATIC `get_health_factor`
+     *
+     * Given an loans and collaterals return health factor
+     *
+     * ### params
+     *
+     * - `{vector<OraclizedAsset>} loans` - loans
+     * - `{vector<OraclizedAsset>} collaterals` - collaterals
+     *
+     * ### example
+     *
+     * ```c++
+     * // Inputs
+     * const vector<OraclizedAsset> loans = { {"400 USDT", 400, 400}, {"100 EOS", 500, 500} };
+     * const vector<OraclizedAsset> collaterals = { {"500 USDT", 700, 300}, {"200 EOS", 600, 375} };
+     *
+     * // Calculation
+     * const double health_factor = defilend::get_health_factor( loans, collaterals );
+     * // => 1.2345
+     * ```
+     */
+    static double get_health_factor( const vector<OraclizedAsset>& loans, const vector<OraclizedAsset>& collaterals )
+    {
+        double deposited = 0, loaned = 0;
+        for(const auto coll: collaterals){
+            deposited += coll.ratioed;
+        }
+
+        for(const auto loan: loans){
+            loaned += loan.value;
+        }
+        return loaned == 0 ? 0 : deposited / loaned;
+    }
+
 
     /**
      * ## STATIC `get_health_factor`
@@ -383,20 +420,83 @@ namespace defilend {
      */
     static double get_health_factor( const name account )
     {
-        double deposited = 0, loaned = 0;
-
         const auto collaterals = get_collaterals(account);
-        for(const auto coll: collaterals){
-            deposited += coll.ratioed;
-        }
-
         const auto loans = defilend::get_loans(account);
-        for(const auto loan: loans){
-            loaned += loan.value;
-        }
-        return loaned == 0 ? 0 : deposited / loaned;
+
+        return get_health_factor(loans, collaterals);
     }
 
+    /**
+     * ## STATIC `get_amount_out`
+     *
+     * Calculate collateral tokens to receive when liquidating {ext_in} debt
+     * Payout = (In * Oracle_last_price_Loan) * (1 + Liquidation_bonus_col) / Oracle_last_price_Col
+     *
+     * ### params
+     *
+     * - `{extended_asset} ext_in` - amount of debt to liquidate
+     * - `{extended_symbol} ext_sym_out` - desired collateral to receive
+     * - `{vector<OraclizedAsset>} loans` - loans
+     * - `{vector<OraclizedAsset>} collaterals` - collaterals
+     *
+     * ### example
+     *
+     * ```c++
+     * // Inputs
+     * const extended_asset ext_in = { "400 USDT@tethertether" };
+     * const extended_symbol ext_sym_out = { "4,EOS@eosio.token" };
+     * const vector<OraclizedAsset> loans = { {"400 USDT", 400, 400}, {"100 EOS", 500, 500} };
+     * const vector<OraclizedAsset> collaterals = { {"500 USDT", 700, 300}, {"200 EOS", 600, 375} };
+     *
+     * // Calculation
+     * const auto out = defilend::get_amount_out( ext_in, ext_sym_out, loans, collaterals );
+     * // => 100 EOS
+     * ```
+     */
+    static extended_asset get_amount_out( const extended_asset ext_in, const extended_symbol ext_sym_out, const vector<OraclizedAsset>& loans, const vector<OraclizedAsset>& collaterals )
+    {
+        const auto hf = get_health_factor(loans, collaterals);
+        if(hf >= 1) return { 0, ext_sym_out };
 
+        double loans_value = 0;
+        extended_asset loan_to_liquidate;
+        for(const auto loan: loans){
+            if(loan.tokens.get_extended_symbol() == ext_in.get_extended_symbol() ) loan_to_liquidate = loan.tokens;
+            loans_value += loan.value;
+        }
+        if(loan_to_liquidate.quantity.amount == 0) return { 0, ext_sym_out };
+
+        reserves reserves_tbl( code, code.value);
+        auto index = reserves_tbl.get_index<"byextsym"_n>();
+        auto it = index.lower_bound(static_cast<uint128_t>(ext_in.contract.value) << 64 | ext_in.quantity.symbol.code().raw());
+        check(it != index.end() && it->sym == ext_in.quantity.symbol, "sx.defilend::get_amount_out1: Not a reserve: " + ext_in.quantity.symbol.code().to_string() + "@" + ext_in.contract.to_string() + " found: " + it->sym.code().to_string());
+        const auto loan_res = *it;
+
+        it = index.lower_bound(static_cast<uint128_t>(ext_sym_out.get_contract().value) << 64 | ext_sym_out.get_symbol().code().raw());
+        check(it != index.end() && it->sym == ext_sym_out.get_symbol(), "sx.defilend::get_amount_out2: Not a reserve: " + ext_sym_out.get_symbol().code().to_string() + "@" + ext_sym_out.get_contract().to_string()+ " found: " + it->sym.code().to_string());
+        const auto coll_res = *it;
+
+        prices prices_tbl( oracle_code, oracle_code.value);
+        double loan_price = 1, coll_price = 1;
+        if(loan_res.oracle_price_id){
+            const auto row = prices_tbl.get(loan_res.oracle_price_id, "defilend::get_amount_out: no loan oracle");
+            loan_price = row.last_price / pow(10, row.precision);
+        }
+        if(coll_res.oracle_price_id){
+            const auto row = prices_tbl.get(coll_res.oracle_price_id, "defilend::get_amount_out: no coll oracle");
+            coll_price = row.last_price / pow(10, row.precision);
+        }
+
+        // Payout = (In * Oracle_last_price_Loan) * (1 + Liquidation_bonus_col) / Oracle_last_price_Col
+        const auto usd_value = ext_in.quantity.amount / pow(10, ext_in.quantity.symbol.precision()) * loan_price;
+        const auto usd_out = usd_value * (1 + static_cast<double>(coll_res.liquidation_bonus) / 10000);
+        const int64_t out = usd_out / coll_price * pow(10, ext_sym_out.get_symbol().precision());
+
+        // print("\n  In: ", ext_in.quantity, " loan_price: ", loan_price, " coll_price: ", coll_price, " usd_value: ", usd_value, " usd_out: ", usd_out, " out: ", out);
+        if(usd_value >= 0.5 * loans_value) return { 0, ext_sym_out };   //only 1/2 of loans allowed to liquidate
+
+        return { out, ext_sym_out };
+
+    }
 
 }

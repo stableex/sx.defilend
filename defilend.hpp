@@ -58,7 +58,7 @@ namespace defilend {
         time_point_sec last_update_time;
 
         uint64_t primary_key() const { return id; }
-        uint128_t get_by_extsym() const { return static_cast<uint128_t>(contract.value) << 64 | sym.code().raw(); }
+        uint128_t get_by_extsym() const { return static_cast<uint128_t>(contract.value) << 64 | (uint64_t) sym.code().to_string().length() << 48 | sym.code().raw(); }
         uint64_t get_by_bsym() const { return bsym.code().raw(); }
     };
     typedef eosio::multi_index< "reserves"_n, reserves_row,
@@ -468,11 +468,11 @@ namespace defilend {
 
         reserves reserves_tbl( code, code.value);
         auto index = reserves_tbl.get_index<"byextsym"_n>();
-        auto it = index.lower_bound(static_cast<uint128_t>(ext_in.contract.value) << 64 | ext_in.quantity.symbol.code().raw());
+        auto it = index.lower_bound(static_cast<uint128_t>(ext_in.contract.value) << 64 | (uint64_t) ext_in.quantity.symbol.code().to_string().length() << 48 | ext_in.quantity.symbol.code().raw());
         check(it != index.end() && it->sym == ext_in.quantity.symbol, "sx.defilend::get_liquidation_out: Loan not a reserve: " + ext_in.quantity.symbol.code().to_string() + "@" + ext_in.contract.to_string() + " found: " + it->sym.code().to_string());
         const auto loan_res = *it;
 
-        it = index.lower_bound(static_cast<uint128_t>(ext_sym_out.get_contract().value) << 64 | ext_sym_out.get_symbol().code().raw());
+        it = index.lower_bound(static_cast<uint128_t>(ext_sym_out.get_contract().value) << 64 | (uint64_t) ext_sym_out.get_symbol().code().to_string().length() << 48 | ext_sym_out.get_symbol().code().raw());
         check(it != index.end() && it->sym == ext_sym_out.get_symbol(), "sx.defilend::get_liquidation_out: Collateral not a reserve: " + ext_sym_out.get_symbol().code().to_string() + "@" + ext_sym_out.get_contract().to_string()+ " found: " + it->sym.code().to_string());
         const auto coll_res = *it;
 

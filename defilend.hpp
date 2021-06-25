@@ -481,12 +481,16 @@ namespace defilend {
         if(hf >= 1) return { 0, ext_sym_out };
 
         double loans_value = 0;
-        extended_asset loan_to_liquidate;
+        extended_asset loan_to_liquidate, coll_to_get;
         for(const auto loan: loans){
             if(loan.tokens.get_extended_symbol() == ext_in.get_extended_symbol() ) loan_to_liquidate = loan.tokens;
             loans_value += loan.value;
         }
-        if(loan_to_liquidate.quantity.amount == 0) return { 0, ext_sym_out };
+        for(const auto coll: collaterals){
+            if(coll.tokens.get_extended_symbol() == ext_sym_out ) coll_to_get = coll.tokens;
+        }
+        if(loan_to_liquidate.quantity.amount == 0 || loan_to_liquidate < ext_in || coll_to_get.quantity.amount == 0)
+            return { 0, ext_sym_out };
 
         // TODO: figure out secondary index to get reserve by extended_symbol
         // reserves reserves_tbl( code, code.value);
@@ -517,6 +521,7 @@ namespace defilend {
 
         // print("\n  In: ", ext_in.quantity, " loan_price: ", loan_price, " coll_price: ", coll_price, " usd_value: ", usd_value, " usd_out: ", usd_out, " out: ", out);
         if(usd_value >= 0.5 * loans_value) return { 0, ext_sym_out };   //only 1/2 of loans allowed to liquidate
+        if(coll_to_get.quantity.amount < out) return { 0, ext_sym_out };   //can't get more than collateral
 
         return { out, ext_sym_out };
 

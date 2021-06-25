@@ -12,6 +12,7 @@ namespace defilend {
     const name code = "lend.defi"_n;
     const std::string description = "Lend.Defi Converter";
     const name token_code = "btoken.defi"_n;
+    const name lptoken_code = "lptoken.defi"_n;
     const name oracle_code = "oracle.defi"_n;
     const extended_symbol value_symbol { symbol{"USDT",4}, "tethertether"_n };
 
@@ -111,12 +112,27 @@ namespace defilend {
         return utils::get_supply({ sym, token_code }).symbol.is_valid();
     }
 
+    static bool is_lptoken( const symbol& sym ) {
+        return utils::get_supply({ sym, lptoken_code }).symbol.is_valid();
+    }
+
     //get first b-token based on symcode (could be wrong if there are multiple wrapped tokens with the same symbol code)
     static extended_symbol get_btoken( const symbol_code& symcode) {
         reserves reserves_tbl( code, code.value);
         for(const auto& row: reserves_tbl) {
             if(row.sym.code() == symcode) {
                 return { row.bsym, token_code };
+            }
+        }
+        return {};
+    }
+
+    //get reserve based on extended symbol. There should be a secondary index for it but it needs further research
+    static reserves_row get_reserve( const extended_symbol ext_sym) {
+        reserves reserves_tbl( code, code.value);
+        for(const auto& row: reserves_tbl) {
+            if(row.sym == ext_sym.get_symbol() && row.contract == ext_sym.get_contract()) {
+                return row;
             }
         }
         return {};
@@ -472,15 +488,16 @@ namespace defilend {
         }
         if(loan_to_liquidate.quantity.amount == 0) return { 0, ext_sym_out };
 
-        reserves reserves_tbl( code, code.value);
-        auto index = reserves_tbl.get_index<"byextsym"_n>();
-        auto it = index.lower_bound(static_cast<uint128_t>(ext_in.contract.value) << 64 | (uint64_t) ext_in.quantity.symbol.code().to_string().length() << 48 | ext_in.quantity.symbol.code().raw());
-        check(it != index.end() && it->sym == ext_in.quantity.symbol, "sx.defilend::get_liquidation_out: Loan not a reserve: " + ext_in.quantity.symbol.code().to_string() + "@" + ext_in.contract.to_string() + " found: " + it->sym.code().to_string());
-        const auto loan_res = *it;
+        // TODO: figure out secondary index to get reserve by extended_symbol
+        // reserves reserves_tbl( code, code.value);
+        // auto index = reserves_tbl.get_index<"byextsym"_n>();
+        // auto it = index.lower_bound(static_cast<uint128_t>(ext_in.contract.value) << 64 | (uint64_t) ext_in.quantity.symbol.code().to_string().length() << 48 | ext_in.quantity.symbol.code().raw());
+        // const auto loan_res = *it;
+        const auto& loan_res = get_reserve(ext_in.get_extended_symbol());
+        check(loan_res.sym == ext_in.quantity.symbol, "sx.defilend::get_liquidation_out: Loan not a reserve: " + ext_in.quantity.symbol.code().to_string() + "@" + ext_in.contract.to_string());
 
-        it = index.lower_bound(static_cast<uint128_t>(ext_sym_out.get_contract().value) << 64 | (uint64_t) ext_sym_out.get_symbol().code().to_string().length() << 48 | ext_sym_out.get_symbol().code().raw());
-        check(it != index.end() && it->sym == ext_sym_out.get_symbol(), "sx.defilend::get_liquidation_out: Collateral not a reserve: " + ext_sym_out.get_symbol().code().to_string() + "@" + ext_sym_out.get_contract().to_string()+ " found: " + it->sym.code().to_string());
-        const auto coll_res = *it;
+        const auto& coll_res = get_reserve(ext_sym_out);
+        check(coll_res.sym == ext_sym_out.get_symbol(), "sx.defilend::get_liquidation_out: Collateral not a reserve: " + ext_sym_out.get_symbol().code().to_string() + "@" + ext_sym_out.get_contract().to_string());
 
         prices prices_tbl( oracle_code, oracle_code.value);
         double loan_price = 1, coll_price = 1;

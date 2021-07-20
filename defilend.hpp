@@ -437,7 +437,7 @@ namespace defilend {
      */
     static double get_health_factor( const name account )
     {
-        const auto collaterals = get_collaterals(account);
+        const auto collaterals = defilend::get_collaterals(account);
         const auto loans = defilend::get_loans(account);
 
         return get_health_factor(loans, collaterals);
@@ -515,7 +515,7 @@ namespace defilend {
         const int64_t out = usd_out / coll_price * pow(10, ext_sym_out.get_symbol().precision());
 
         // print("\n  In: ", ext_in.quantity, " loan_price: ", loan_price, " coll_price: ", coll_price, " usd_value: ", usd_value, " usd_out: ", usd_out, " out: ", out);
-        if(usd_value >= 0.5 * loans_value) return { 0, ext_sym_out };   //only 1/2 of loans allowed to liquidate
+        if(usd_value > 0.49 * loans_value) return { 0, ext_sym_out };   //only 1/2 of loans allowed to liquidate, take 0.49 to be on the safe side
         if(coll_to_get.quantity.amount < out) return { 0, ext_sym_out };   //can't get more than collateral
 
         return { out, ext_sym_out };

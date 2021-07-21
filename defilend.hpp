@@ -7,6 +7,7 @@ namespace defilend {
 
     using namespace eosio;
     using namespace sx;
+    using namespace sx::utils;
 
     const name id = "defilend"_n;
     const name code = "lend.defi"_n;
@@ -100,12 +101,6 @@ namespace defilend {
         uint64_t primary_key()const { return reserve_id; }
     };
     typedef eosio::multi_index< "userreserves"_n, userreserves_row > userreserves;
-
-    struct OraclizedAsset {
-        extended_asset tokens;
-        double value;
-        double ratioed;
-    };
 
     static bool is_btoken( const symbol& sym ) {
         return utils::get_supply({ sym, token_code }).symbol.is_valid();

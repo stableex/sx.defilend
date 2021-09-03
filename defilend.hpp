@@ -359,15 +359,14 @@ namespace defilend {
         const auto now = eosio::current_time_point().sec_since_epoch();
         for(const auto& row: userreserves_tbl) {
             const auto reserve = reserves_tbl.get(row.reserve_id, "defilend: no loan reserve");
-            const auto secs = now - row.last_update_time.sec_since_epoch();
-            const auto rate1 = reserve.current_variable_borrow_rate * secs / (365*24*60*60);
-            const auto rate2 = rate1 * reserve.last_variable_borrow_cumulative_index / row.last_variable_borrow_cumulative_index;
-            const auto accrued_amount = row.principal_borrow_balance.amount * rate2 / 100000000000000;
-            const auto accrued = asset{ static_cast<int64_t>(accrued_amount), row.principal_borrow_balance.symbol };
-            // print("\n  Principal: ", row.principal_borrow_balance, ", Seconds: ", secs, ", Rate1: ", rate1, ", Rate2: ", rate2, ", accrued: ", accrued);
-            const extended_asset ext_tokens = { row.principal_borrow_balance + accrued, reserve.contract };
-            const auto value = get_value(ext_tokens, reserve.oracle_price_id);
-            res.push_back({ ext_tokens, value, value });
+            const int128_t secs = now - reserve.last_update_time.sec_since_epoch();
+            const int128_t rate1 = reserve.current_variable_borrow_rate * secs / (365*24*60*60);
+            const int128_t rate2 = (100000000000000 + rate1) * reserve.last_variable_borrow_cumulative_index / row.last_variable_borrow_cumulative_index;
+            const int128_t total_amount = row.principal_borrow_balance.amount * rate2 / 100000000000000;
+            // print("\nPrincipal: ", row.principal_borrow_balance, ", Seconds: ", secs, ", Rate1: ", rate1, ", Rate2: ", rate2, ", total_amount: ", total_amount);
+            const extended_asset ext_total = { asset(static_cast<int64_t>(total_amount), row.principal_borrow_balance.symbol), reserve.contract };
+            const auto value = get_value(ext_total, reserve.oracle_price_id);
+            res.push_back({ ext_total, value, value });
         }
 
         return res;
@@ -467,8 +466,9 @@ namespace defilend {
      */
     static extended_asset get_liquidation_out( const extended_asset ext_in, const extended_symbol ext_sym_out, const vector<OraclizedAsset>& loans, const vector<OraclizedAsset>& collaterals )
     {
-        const auto hf = get_health_factor(loans, collaterals);
-        if(hf >= 1) return { 0, ext_sym_out };
+        // no need to check health factor - should check before calling this function
+        // const auto hf = get_health_factor(loans, collaterals);
+        // if(hf >= 1) return { 0, ext_sym_out };
 
         double loans_value = 0;
         extended_asset loan_to_liquidate, coll_to_get;
@@ -495,11 +495,11 @@ namespace defilend {
 
         prices prices_tbl( oracle_code, oracle_code.value);
         double loan_price = 1, coll_price = 1;
-        if(loan_res.oracle_price_id){
+        if(loan_res.oracle_price_id){   // 0 == USDT
             const auto row = prices_tbl.get(loan_res.oracle_price_id, "defilend::get_liquidation_out: no loan oracle");
             loan_price = row.last_price / pow(10, row.precision);
         }
-        if(coll_res.oracle_price_id){
+        if(coll_res.oracle_price_id){   // 0 == USDT
             const auto row = prices_tbl.get(coll_res.oracle_price_id, "defilend::get_liquidation_out: no coll oracle");
             coll_price = row.last_price / pow(10, row.precision);
         }

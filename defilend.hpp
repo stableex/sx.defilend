@@ -9,12 +9,12 @@ namespace defilend {
     using namespace sx;
     using namespace sx::utils;
 
-    const name id = "defilend"_n;
-    const name code = "lend.defi"_n;
+    constexpr name id = "defilend"_n;
+    constexpr name code = "lend.defi"_n;
     const std::string description = "Lend.Defi Converter";
-    const name token_code = "btoken.defi"_n;
-    const name oracle_code = "oracle.defi"_n;
-    const extended_symbol value_symbol { symbol{"USDT",4}, "tethertether"_n };
+    constexpr name token_code = "btoken.defi"_n;
+    constexpr name oracle_code = "oracle.defi"_n;
+    constexpr extended_symbol value_symbol { symbol{"USDT",4}, "tethertether"_n };
 
     struct [[eosio::table]] reserves_row {
         uint64_t    id;
@@ -310,21 +310,16 @@ namespace defilend {
         reserves reserves_tbl( code, code.value);
         userconfigs configs_tbl(code, account.value);
         for(const auto& row: configs_tbl) {
-            // print("\nColl id: ", row.reserve_id);
             if(!row.use_as_collateral) continue;
             const auto reserve = reserves_tbl.get(row.reserve_id, "defilend: no collateral reserve");
             const auto bdeposit = utils::get_balance({ reserve.bsym, token_code }, account ).quantity;
-            // print(", Balance: ", bdeposit);
             if(bdeposit.amount == 0) continue;
             const auto supply = utils::get_supply({ reserve.bsym, token_code });
-            // print(", Supply: ", supply);
             const auto tokens_amount = static_cast<int128_t>(reserve.practical_balance.amount) * bdeposit.amount / supply.amount;
             const auto tokens = asset{ static_cast<int64_t>(tokens_amount), reserve.practical_balance.symbol };
             const extended_asset ext_tokens = { tokens, reserve.contract };
-            // print(", Tokens: ", tokens);
             if( tokens.amount == 0) continue;
             const auto value = get_value(ext_tokens, reserve.oracle_price_id);
-            // print(", Value: $", (int)value);
             res.push_back({ ext_tokens, value, value * reserve.liquidation_threshold / 10000 });
         }
 
